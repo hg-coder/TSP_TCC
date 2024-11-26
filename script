@@ -1,4 +1,4 @@
-### IMPORTAÇÃO DAS BIBLIOTECAS NECESSÁRIAS
+### IMPORTAR AS BIBLIOTECAS ###
 from tqdm import tqdm # Exibição de barra de progresso
 import pandas as pd # Ler a base do Excel
 from geopy.geocoders import Nominatim # Conversão de endereços em coordenadas geográficas
@@ -8,35 +8,35 @@ import requests # Requisições HTTP para as APIs Nominatim e OSRM
 import pyomo.environ as pyo # Modelagem matemática e otimização
 import folium # Criar mapas interativos
 import polyline # Decodificar polylines (codificação de rotas geográficas)
-import sys
-import time
+import sys # Permitir sair do sistema em caso de erro
+import time # Cálculo do tempo otimização
 
-### IMPORTAÇÃO DOS DADOS E INICIALIZAÇÃO DO GEOCODER
+
+### IMPORTAR DADOS E INICIALIZAR O GEOCODER ###
 inicio_coordenadas = time.time()
+
 # Lê o arquivo Excel com os endereços das localizações
 locais = pd.read_excel('Locais.xlsx', 'Planilha1')
 
 # Inicializa o geocoder com um user_agent descritivo
-locator = Nominatim(user_agent="meu_app_de_geolocalizacao")
+localizador = Nominatim(user_agent="meu_app_de_geolocalizacao")
 
-# Aplica o RateLimiter à função geocode e garante um atraso mínimo de 1 segundo entre as requisições
-geocode = RateLimiter(locator.geocode, min_delay_seconds=1)
+# Aplica o RateLimiter ao geocode com atraso de 1 segundo entre requisições
+geocode = RateLimiter(localizador.geocode, min_delay_seconds=1)
 
 
-### OBTÉM AS COORDENADAS GEOGRÁFICAS (LATITUDE E LONGITUDE) DOS ENDEREÇOS DO ARQUIVO EXCEL
+### OBTER AS COORDENADAS DOS ENDEREÇOS (LATITUDE E LONGITUDE) ###
 coordenadas_obtidas = True  # Variável para controlar se todas as coordenadas foram obtidas
-
 i = 0
 while i < len(locais):
     try:
         endereco = locais['Endereco'][i]
         print(f"Buscando coordenadas para: {endereco}")
 
-        # Usa a função geocode com RateLimiter
-        location = geocode(endereco)
+        local = geocode(endereco) # Usa a função geocode com RateLimiter
 
-        if location:
-            print(f"Coordenadas: {i+1} ({location.latitude}, {location.longitude})\n")
+        if local:
+            print(f"Coordenadas: {i+1} ({local.latitude}, {local.longitude})\n")
         else:
             print(f"Endereço não encontrado. Revise-o e tente novamente.\n")
             coordenadas_obtidas = False  # Define como False se algum endereço não for encontrado
@@ -44,7 +44,6 @@ while i < len(locais):
     except (GeocoderTimedOut, GeocoderServiceError) as e:
         print(f"Erro na geocodificação do endereço {locais['Endereco'][i+1]}: {e}")
         coordenadas_obtidas = False  # Define como False em caso de erro na geocodificação
-
     i += 1
 
 if coordenadas_obtidas == True:
@@ -54,19 +53,21 @@ else:
     sys.exit()
 fim_coordenadas = time.time()
 
-### CRIA A MATRIZ "DISTÂNCIAS" E INCLUI AS DISTÂNCIAS RODOVIÁRIAS CALCULADAS PELA API (IDA E VOLTA SEPARADAS)
+
+### CRIAR A MATRIZ DE DISTÂNCIAS ###
 inicio_calculo = time.time()
-# Cria uma matriz para armazenar as distâncias
+
+# Cria a matriz
 num_locais = len(locais)
 distancias = [[0 for _ in range(num_locais)] for _ in range(num_locais)]
 
 # Função para calcular a distância rodoviária usando a API Nominatim
 def calcular_distancia_rodoviaria(coord1, coord2):
     url = f"https://router.project-osrm.org/route/v1/driving/{coord1[1]},{coord1[0]};{coord2[1]},{coord2[0]}?overview=full&geometries=polyline"
-    response = requests.get(url)
-    data = response.json()
-    if 'routes' in data and len(data['routes']) > 0:
-        return data['routes'][0]['distance']  # Retorna a distância em metros
+    resposta = requests.get(url)
+    dados = resposta.json()
+    if 'routes' in dados and len(dados['routes']) > 0:
+        return dados['routes'][0]['distance']  # Retorna a distância
     else:
         print(f"Erro ao calcular a distância entre {coord1} e {coord2}")
         return None
@@ -79,25 +80,25 @@ for i in tqdm(range(num_locais), desc="Calculando distâncias"):
             endereco2 = locais['Endereco'][j]
 
             # Obtém as coordenadas dos endereços
-            location1 = geocode(endereco1)
-            location2 = geocode(endereco2)
+            local1 = geocode(endereco1)
+            local2 = geocode(endereco2)
 
-            if location1 and location2:
+            if local1 and local2:
                 # Calcula a distância de i para j
                 distancia_ida = calcular_distancia_rodoviaria(
-                    (location1.latitude, location1.longitude),
-                    (location2.latitude, location2.longitude)
+                    (local1.latitude, local1.longitude),
+                    (local2.latitude, local2.longitude)
                 )
                 # Calcula a distância de j para i
                 distancia_volta = calcular_distancia_rodoviaria(
-                    (location2.latitude, location2.longitude),
-                    (location1.latitude, location1.longitude)
+                    (local2.latitude, local2.longitude),
+                    (local1.latitude, local1.longitude)
                 )
 
                 if distancia_ida is not None and distancia_volta is not None:
                     # Armazena as distâncias na matriz (em metros)
-                    distancias[i][j] = distancia_ida  # Ida: de i para j
-                    distancias[j][i] = distancia_volta  # Volta: de j para i
+                    distancias[i][j] = distancia_ida  # Ida: i para j
+                    distancias[j][i] = distancia_volta  # Volta: j para i
 
         except (GeocoderTimedOut, GeocoderServiceError) as e:
             print(f"Erro na geocodificação: {e}")
@@ -106,129 +107,179 @@ for i in tqdm(range(num_locais), desc="Calculando distâncias"):
 for linha in distancias:
     print(linha)
 
-### CÁLCULO DE OTIMIZAÇÃO DO PYOMO
+
+### CÁLCULO DE OTIMIZAÇÃO DO PYOMO ###
 # Modelo Pyomo para o PCV
-model = pyo.ConcreteModel()
+modelo = pyo.ConcreteModel()
 
 # Conjuntos
-model.N = pyo.RangeSet(num_locais)  # Conjunto de nós (cidades)
-model.A = pyo.Set(within=model.N * model.N, initialize = [(i,j) for i in model.N for j in model.N if i!=j]) # Conjunto de arcos
+modelo.N = pyo.RangeSet(num_locais)  # Conjunto de nós
+modelo.A = pyo.Set(within=modelo.N * modelo.N, initialize = [(i,j) for i in modelo.N for j in modelo.N if i!=j]) # Conjunto de arcos
 
 # Parâmetros
-model.c = pyo.Param(model.A, initialize={(i, j): distancias[i-1][j-1] for i, j in model.A})  # Custo (distância) entre cada par de cidades
+modelo.c = pyo.Param(modelo.A, initialize={(i, j): distancias[i-1][j-1] for i, j in modelo.A})  # Custo (distância) entre cada par de nós
 
 # Variáveis de decisão
-model.x = pyo.Var(model.A, within=pyo.Binary)  # 1 se o arco (i,j) é percorrido, 0 caso contrário
+modelo.x = pyo.Var(modelo.A, within=pyo.Binary)  # 1 se o arco (i,j) é percorrido, 0 caso contrário
 
 # Função objetivo: minimizar a distância total
-def objective_rule(model):
-    return sum(model.c[i, j] * model.x[i, j] for i, j in model.A)
-model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize)
+def objetivo_solver(modelo):
+    return sum(modelo.c[i, j] * modelo.x[i, j] for i, j in modelo.A)
+modelo.objetivo = pyo.Objective(rule=objetivo_solver, sense=pyo.minimize)
 
 # Restrições
-# 1. Cada cidade deve ser visitada exatamente uma vez
-def rule_visit_once(model, j):
-    return sum(model.x[i, j] for i in model.N if (i, j) in model.A) == 1
-model.visit_once = pyo.Constraint(model.N, rule=rule_visit_once)
+# 1. Cada local deve ser visitado exatamente uma vez
+def restricao_visitar_uma_vez(modelo, j):
+    return sum(modelo.x[i, j] for i in modelo.N if (i, j) in modelo.A) == 1
+modelo.visitar_uma_vez = pyo.Constraint(modelo.N, rule=restricao_visitar_uma_vez)
 
-# 2. Cada cidade deve ser saída de exatamente uma viagem
-def rule_leave_once(model, i):
-    return sum(model.x[i, j] for j in model.N if (i, j) in model.A) == 1
-model.leave_once = pyo.Constraint(model.N, rule=rule_leave_once)
+# 2. Cada local deve ser saída de exatamente uma viagem
+def restricao_sair_uma_vez(modelo, i):
+    return sum(modelo.x[i, j] for j in modelo.N if (i, j) in modelo.A) == 1
+modelo.sair_uma_vez = pyo.Constraint(modelo.N, rule=restricao_sair_uma_vez)
 
 # 3. Eliminar subtours (restrição MTZ)
 #     u_i - u_j + n * x_ij <= n - 1  para todo i, j em N, i != j, i, j >= 2
-model.u = pyo.Var(model.N, within=pyo.NonNegativeReals)
-def rule_subtour_elimination(model, i, j):
+modelo.u = pyo.Var(modelo.N, within=pyo.NonNegativeReals)
+def restricao_eliminacao_subtours(modelo, i, j):
     if i != j and i >= 2 and j >= 2:
-        return model.u[i] - model.u[j] + num_locais * model.x[i, j] <= num_locais - 1
+        return modelo.u[i] - modelo.u[j] + num_locais * modelo.x[i, j] <= num_locais - 1
     else:
         return pyo.Constraint.Skip
-model.subtour_elimination = pyo.Constraint(model.N, model.N, rule=rule_subtour_elimination)
+modelo.eliminacao_subtours = pyo.Constraint(modelo.N, modelo.N, rule=restricao_eliminacao_subtours)
 
-# 4. Garantir que a última cidade visitada se conecte de volta à primeira
-def rule_return_to_origin(model):
-    return sum(model.x[i, 1] for i in model.N if (i, 1) in model.A) == 1
-model.return_to_origin = pyo.Constraint(rule=rule_return_to_origin)
+# 4. Garantir que o último local visitado se conecte de volta ao primeiro
+def restricao_retornar_para_origem(modelo):
+    return sum(modelo.x[i, 1] for i in modelo.N if (i, 1) in modelo.A) == 1
+modelo.retornar_para_origem = pyo.Constraint(rule=restricao_retornar_para_origem)
 
 # Resolve o modelo
 solver = pyo.SolverFactory('glpk')
-results = solver.solve(model)
+resultado_solver = solver.solve(modelo)
 
 # Imprime os resultados
-print(results)
+print(resultado_solver)
 
 # Exibe a rota ótima
 rota = []
-cidade_atual = 1  # Começa na cidade 1
+local_atual = 1  # Começa no local 1
 while True:
-    rota.append(cidade_atual)
-    for j in model.N:
-        if (cidade_atual, j) in model.A and pyo.value(model.x[cidade_atual, j]) == 1:
-            cidade_atual = j
+    rota.append(local_atual)
+    for j in modelo.N:
+        if (local_atual, j) in modelo.A and pyo.value(modelo.x[local_atual, j]) == 1:
+            local_atual = j
             break
-    if cidade_atual == 1:  # Volta para a cidade inicial
+    if local_atual == 1:  # Volta para o local inicial
         break
 
-# Adiciona a cidade de origem no final da rota
+# Adiciona o local de origem no final da rota
 rota.append(1)
 
 print("Rota ótima:", rota)
 fim_calculo = time.time()
-"""
-### CRIAÇÃO DO MAPA COM A ROTA RODOVIÁRIA OTIMIZADA EM UM ARQUIVO .HTML
-# Cria um mapa centrado na primeira localização
-mapa = folium.Map(location=[location1.latitude, location1.longitude], zoom_start=10)
+
+
+### CRIAR O MAPA COM A ROTA ÓTIMA EM UM ARQUIVO .HTML ###
+# Cria o mapa
+mapa = folium.Map(location=[local1.latitude, local1.longitude], zoom_start=10)
 
 # Adiciona marcadores para cada localização
-for i, location in enumerate(locais['Endereco']):
+for i, local in enumerate(locais['Endereco']):
+    html_icone = f"""
+    <div style="
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        color: white;
+        text-align: center;
+        background-color: blue; 
+        border-radius: 50%; 
+        width: 30px; 
+        height: 30px; 
+        line-height: 30px; 
+    ">{i + 1}</div>
+    """
+    icone = folium.DivIcon(html=html_icone)
+
     folium.Marker(
-        location=[geocode(location).latitude, geocode(location).longitude],
-        tooltip=f"Localização {i+1}"
+        location=[geocode(local).latitude, geocode(local).longitude],
+        icon=icone
     ).add_to(mapa)
 
-# Função para obter a rota real (polyline) da API OSRM
+# Função para obter a rota da API OSRM
 def obter_rota_real(coord1, coord2):
     url = f"https://router.project-osrm.org/route/v1/driving/{coord1[1]},{coord1[0]};{coord2[1]},{coord2[0]}?overview=full&geometries=polyline"
-    response = requests.get(url)
-    data = response.json()
-    if 'routes' in data and len(data['routes']) > 0:
-        return data['routes'][0]['geometry']  # Retorna a polyline da rota
+    resposta = requests.get(url)
+    dados = resposta.json()
+    if 'routes' in dados and len(dados['routes']) > 0:
+        return dados['routes'][0]['geometry']  # Retorna a polyline da rota
     else:
         print(f"Erro ao obter a rota entre {coord1} e {coord2}")
         return None
 
-# Cria uma lista de coordenadas para a rota rodoviária (decodificando as polylines)
+# Cria uma lista de coordenadas para a rota (decodificando as polylines)
 coordenadas_rota_real = []
 for i in range(len(rota) - 1):
-    cidade_atual = rota[i]
-    proxima_cidade = rota[i + 1]
+    local_atual = rota[i]
+    proximo_local = rota[i + 1]
 
-    endereco_atual = locais['Endereco'][cidade_atual - 1]
-    endereco_proximo = locais['Endereco'][proxima_cidade - 1]
+    endereco_atual = locais['Endereco'][local_atual - 1]
+    endereco_proximo = locais['Endereco'][proximo_local - 1]
 
-    location_atual = geocode(endereco_atual)
-    location_proximo = geocode(endereco_proximo)
+    local_atual = geocode(endereco_atual)
+    local_proximo = geocode(endereco_proximo)
 
     polyline_rota = obter_rota_real(
-        (location_atual.latitude, location_atual.longitude),
-        (location_proximo.latitude, location_proximo.longitude)
+        (local_atual.latitude, local_atual.longitude),
+        (local_proximo.latitude, local_proximo.longitude)
     )
 
     if polyline_rota:
-        # Decodifica a polyline para obter as coordenadas da rota rodoviária
+        # Decodifica a polyline para obter as coordenadas da rota
         coordenadas_decodificadas = polyline.decode(polyline_rota)
         coordenadas_rota_real.extend(coordenadas_decodificadas)
 
-# Adiciona a rota rodoviária ao mapa
+# Adiciona a rota ao mapa
 folium.PolyLine(coordenadas_rota_real, color="blue", weight=2.5, opacity=1).add_to(mapa)
 
-# Salva o mapa em um arquivo HTML
-mapa.save("rota_rodoviaria_otima.html")
-print('\nMapa gerado no arquivo "rota_rodoviaria_otima.html"')
+# Adiciona a variável "rota" como uma lista no mapa
+rota = rota[:-1]
+rota_html = f"""
+    <div id="rota-fixa" style="
+        position: fixed; 
+        bottom: 0px; 
+        right: -600px; 
+        font-family: Arial, sans-serif;
+        font-size: 16px;
+        color: black; 
+        text-align: left;
+        background-color: rgba(255, 255, 255, 1);
+        padding: 5px;
+        border-radius: 5px;
+        white-space: pre-line;
+    ">
+        Lista de endereços:<br>
+        {
+            "<br>".join([f"{indice} - {locais['Endereco'][indice-1]}" for i, indice in enumerate(rota)])
+        }
+    </div>
 """
-#Cálculo de tempos
+
+icone = folium.DivIcon(html=rota_html)
+popup = folium.Popup(icone, max_width=2650, show=True)
+
+# Cria um marcador invisível para "segurar" o popup com a rota
+folium.Marker(
+    location=[list(coordenadas_rota_real[0])[0], list(coordenadas_rota_real[0])[1]],
+    icon=icone
+).add_to(mapa)
+
+# Salva o mapa em um arquivo HTML
+mapa.save("rota_otima.html")
+print('\nMapa gerado no arquivo "rota_otima.html"')
+
+
+### CALCULAR TEMPOS DE COLETA DE COORDENADAS E CÁLCULO DE OTIMIZAÇÃO ###
 tempo_coordenadas = fim_coordenadas - inicio_coordenadas
-print(f"\nTempo de busca de coordenadas: {tempo_coordenadas:.1f} segundos")
+print(f"\nTempo busca coordenadas: {tempo_coordenadas:.1f} seg.")
 tempo_calculo = fim_calculo - inicio_calculo
-print(f"Tempo de busca de distâncias e cálculo de otimização: {tempo_calculo:.1f} segundos")
+print(f"Tempo busca distâncias e cálculo otimização: {tempo_calculo:.1f} seg.")
