@@ -114,7 +114,7 @@ modelo = pyo.ConcreteModel()
 
 # Conjuntos
 modelo.N = pyo.RangeSet(num_locais)  # Conjunto de nós
-modelo.A = pyo.Set(within=modelo.N * modelo.N, initialize = [(i,j) for i in modelo.N for j in modelo.N if i!=j]) # Conjunto de arcos
+modelo.A = pyo.Set(within=modelo.Ni * modelo.N, initialize = [(i,j) for i in modelo.N for j in modelo.N if i!=j]) # Conjunto de arcos
 
 # Parâmetros
 modelo.c = pyo.Param(modelo.A, initialize={(i, j): distancias[i-1][j-1] for i, j in modelo.A})  # Custo (distância) entre cada par de nós
@@ -139,8 +139,8 @@ def restricao_sair_uma_vez(modelo, i):
 modelo.sair_uma_vez = pyo.Constraint(modelo.N, rule=restricao_sair_uma_vez)
 
 # 3. Eliminar subtours (restrição MTZ)
-#     u_i - u_j + n * x_ij <= n - 1  para todo i, j em N, i != j, i, j >= 2
-modelo.u = pyo.Var(modelo.N, within=pyo.NonNegativeReals)
+#     u_i - u_j + p * x_ij <= p - 1  para todo i, j em N, i != j, i, j >= 2
+modelo.u = pyo.Var(modelo.N, within=pyo.NonNegativeReals) # Ordem de visita
 def restricao_eliminacao_subtours(modelo, i, j):
     if i != j and i >= 2 and j >= 2:
         return modelo.u[i] - modelo.u[j] + num_locais * modelo.x[i, j] <= num_locais - 1
