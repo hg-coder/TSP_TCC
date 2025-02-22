@@ -114,7 +114,7 @@ modelo = pyo.ConcreteModel()
 
 # Conjuntos
 modelo.N = pyo.RangeSet(num_locais)  # Conjunto de nós
-modelo.A = pyo.Set(within=modelo.Ni * modelo.N, initialize = [(i,j) for i in modelo.N for j in modelo.N if i!=j]) # Conjunto de arcos
+modelo.A = pyo.Set(within=modelo.N * modelo.N, initialize = [(i,j) for i in modelo.N for j in modelo.N if i!=j]) # Conjunto de arcos
 
 # Parâmetros
 modelo.c = pyo.Param(modelo.A, initialize={(i, j): distancias[i-1][j-1] for i, j in modelo.A})  # Custo (distância) entre cada par de nós
